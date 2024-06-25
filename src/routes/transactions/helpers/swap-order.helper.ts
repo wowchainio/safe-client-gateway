@@ -116,12 +116,12 @@ export class SwapOrderHelper {
   /**
    * Checks if the app associated with an order is allowed.
    *
-   * @param order - the order to which we should verify the app data with
+   * @param fullAppData - the appData of an order which we should verify the app data with
    * @returns true if the app is allowed, false otherwise.
    */
-  isAppAllowed(order: Order): boolean {
+  isAppAllowed(fullAppData: Order['fullAppData']): boolean {
     if (!this.restrictApps) return true;
-    const appCode = order.fullAppData?.appCode;
+    const appCode = fullAppData?.appCode;
     return (
       !!appCode && typeof appCode === 'string' && this.allowedApps.has(appCode)
     );

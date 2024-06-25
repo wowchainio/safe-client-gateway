@@ -59,6 +59,10 @@ export class SwapTransferInfoMapper {
       return null;
     }
 
+    if (!this.swapOrderHelper.isAppAllowed(order.fullAppData)) {
+      throw new Error(`Unsupported App: ${order.fullAppData?.appCode}`);
+    }
+
     const [sellToken, buyToken] = await Promise.all([
       this.swapOrderHelper.getToken({
         address: order.sellToken,

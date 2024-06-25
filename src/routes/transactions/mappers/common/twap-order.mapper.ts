@@ -79,10 +79,18 @@ export class TwapOrderMapper {
         : twapParts
       : [];
 
-    const [{ fullAppData }, ...orders] = await Promise.all([
-      // Decode hash of `appData`
-      this.swapsRepository.getFullAppData(chainId, twapStruct.appData),
-      ...partsToFetch.map((order) => {
+    const { fullAppData } = await this.swapsRepository.getFullAppData(
+      chainId,
+      twapStruct.appData,
+    );
+
+    // Parent order is from a disallowed app
+    if (!this.swapOrderHelper.isAppAllowed(fullAppData)) {
+      throw new Error(`Unsupported App: ${fullAppData?.appCode}`);
+    }
+
+    const orders = await Promise.all(
+      partsToFetch.map((order) => {
         const orderUid = this.gpv2OrderHelper.computeOrderUid({
           chainId,
           owner: safeAddress,
@@ -90,9 +98,14 @@ export class TwapOrderMapper {
         });
         return this.swapOrderHelper.getOrder({ chainId, orderUid });
       }),
-    ]);
+    );
 
-    // TODO: Handling of restricted Apps, calling `getToken` directly instead of multiple times in `getOrder` for sellToken and buyToken
+    for (const order of orders) {
+      // A fulfillment if from a disallowed app
+      if (!this.swapOrderHelper.isAppAllowed(order)) {
+        throw new Error(`Unsupported App: ${order.fullAppData?.appCode}`);
+      }
+    }
 
     const executedSellAmount: TwapOrderInfo['executedSellAmount'] =
       hasAbundantParts ? null : this.getExecutedSellAmount(orders).toString();
