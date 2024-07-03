@@ -19,18 +19,12 @@ describe('AccountsDatasource tests', () => {
 
   // Run pending migrations before tests
   beforeAll(async () => {
+    target = new AccountsDatasource(sql, mockLoggingService);
     await migrator.migrate();
   });
 
-  beforeEach(() => {
-    target = new AccountsDatasource(sql, mockLoggingService);
-  });
-
-  afterEach(async () => {
-    await sql`TRUNCATE TABLE accounts, groups, account_data_types CASCADE`;
-  });
-
   afterAll(async () => {
+    await sql`TRUNCATE TABLE accounts, groups, account_data_types CASCADE`;
     await sql.end();
   });
 
