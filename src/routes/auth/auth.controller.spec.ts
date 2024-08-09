@@ -35,6 +35,10 @@ import {
   IBlockchainApiManager,
 } from '@/domain/interfaces/blockchain-api.manager.interface';
 import { TestBlockchainApiManagerModule } from '@/datasources/blockchain/__tests__/test.blockchain-api.manager';
+import { TestAccountsDataSourceModule } from '@/datasources/accounts/__tests__/test.accounts.datasource.module';
+import { AccountsDatasourceModule } from '@/datasources/accounts/accounts.datasource.module';
+import { TestCounterfactualSafesDataSourceModule } from '@/datasources/accounts/counterfactual-safes/__tests__/test.counterfactual-safes.datasource.module';
+import { CounterfactualSafesDatasourceModule } from '@/datasources/accounts/counterfactual-safes/counterfactual-safes.datasource.module';
 
 const verifySiweMessageMock = jest.fn();
 
@@ -50,6 +54,10 @@ describe('AuthController', () => {
     })
       .overrideModule(JWT_CONFIGURATION_MODULE)
       .useModule(JwtConfigurationModule.register(jwtConfiguration))
+      .overrideModule(AccountsDatasourceModule)
+      .useModule(TestAccountsDataSourceModule)
+      .overrideModule(CounterfactualSafesDatasourceModule)
+      .useModule(TestCounterfactualSafesDataSourceModule)
       .overrideModule(BlockchainApiManagerModule)
       .useModule(TestBlockchainApiManagerModule)
       .overrideModule(CacheModule)
@@ -81,10 +89,7 @@ describe('AuthController', () => {
     await app.init();
   }
 
-  beforeEach(async () => {
-    jest.useFakeTimers();
-    jest.resetAllMocks();
-
+  beforeAll(async () => {
     const defaultConfiguration = configuration();
     const testConfiguration = (): typeof defaultConfiguration => ({
       ...defaultConfiguration,
@@ -99,6 +104,11 @@ describe('AuthController', () => {
     });
 
     await initApp(testConfiguration);
+  });
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.resetAllMocks();
   });
 
   afterAll(async () => {
