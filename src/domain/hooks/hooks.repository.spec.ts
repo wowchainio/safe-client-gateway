@@ -248,6 +248,7 @@ describe('HooksRepository (Unit)', () => {
     });
     // cache should be cleared after logging
     await expect(fakeCacheService.getCounter(cacheKey)).resolves.toBeNull();
+    eventCacheHelper.onModuleDestroy();
   });
 });
 
@@ -414,6 +415,7 @@ describe('HooksRepositoryWithNotifications (Unit)', () => {
     });
     // cache should be cleared after logging
     await expect(fakeCacheService.getCounter(cacheKey)).resolves.toBeNull();
+    eventCacheHelper.onModuleDestroy();
   });
 
   it('should store the unsupported chain events for several chains and log them after UNSUPPORTED_EVENTS_LOG_INTERVAL', async () => {
@@ -467,5 +469,6 @@ describe('HooksRepositoryWithNotifications (Unit)', () => {
     // cache should be cleared after logging
     await expect(fakeCacheService.getCounter(cacheKeys[0])).resolves.toBeNull();
     await expect(fakeCacheService.getCounter(cacheKeys[1])).resolves.toBeNull();
+    eventCacheHelper.onModuleDestroy();
   });
 });
