@@ -8,6 +8,7 @@ import type { IConfigurationService } from '@/config/configuration.service.inter
 import clearAllMocks = jest.clearAllMocks;
 import { redisClientFactory } from '@/__tests__/redis-client.factory';
 import { MAX_TTL } from '@/datasources/cache/constants';
+import { flushByPrefix } from '@/__tests__/redis-helper';
 
 const mockLoggingService: jest.MockedObjectDeep<ILoggingService> = {
   info: jest.fn(),
@@ -24,12 +25,11 @@ const mockConfigurationService = jest.mocked(configurationService);
 describe('RedisCacheService', () => {
   let redisCacheService: RedisCacheService;
   let defaultExpirationTimeInSeconds: number;
-  const keyPrefix = '';
+  const cachePrefix = crypto.randomUUID();
   let redisClient: RedisClientType;
-  const redisDatabase = faker.number.int({ min: 1, max: 10 });
 
   beforeAll(async () => {
-    redisClient = await redisClientFactory(redisDatabase);
+    redisClient = await redisClientFactory();
   });
 
   afterAll(async () => {
@@ -38,7 +38,7 @@ describe('RedisCacheService', () => {
 
   beforeEach(async () => {
     clearAllMocks();
-    await redisClient.flushDb();
+    await flushByPrefix(redisClient, cachePrefix);
     defaultExpirationTimeInSeconds = faker.number.int();
     mockConfigurationService.getOrThrow.mockImplementation((key) => {
       if (key === 'expirationTimeInSeconds.default') {
@@ -51,7 +51,7 @@ describe('RedisCacheService', () => {
       redisClient,
       mockLoggingService,
       mockConfigurationService,
-      keyPrefix,
+      cachePrefix,
     );
   });
 
@@ -64,7 +64,10 @@ describe('RedisCacheService', () => {
 
     await redisCacheService.hSet(cacheDir, value, undefined);
 
-    const storedValue = await redisClient.hGet(cacheDir.key, cacheDir.field);
+    const storedValue = await redisClient.hGet(
+      `${cachePrefix}-${cacheDir.key}`,
+      cacheDir.field,
+    );
     expect(storedValue).toBeNull();
   });
 
@@ -78,8 +81,11 @@ describe('RedisCacheService', () => {
 
     await redisCacheService.hSet(cacheDir, value, expireTime);
 
-    const storedValue = await redisClient.hGet(cacheDir.key, cacheDir.field);
-    const ttl = await redisClient.ttl(cacheDir.key);
+    const storedValue = await redisClient.hGet(
+      `${cachePrefix}-${cacheDir.key}`,
+      cacheDir.field,
+    );
+    const ttl = await redisClient.ttl(`${cachePrefix}-${cacheDir.key}`);
     expect(storedValue).toEqual(value);
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(expireTime);
@@ -96,7 +102,10 @@ describe('RedisCacheService', () => {
       redisCacheService.hSet(cacheDir, '', Number.MAX_VALUE + 1),
     ).rejects.toThrow();
 
-    const storedValue = await redisClient.hGet(cacheDir.key, cacheDir.field);
+    const storedValue = await redisClient.hGet(
+      `${cachePrefix}-${cacheDir.key}`,
+      cacheDir.field,
+    );
     expect(storedValue).toBeNull();
   });
 
@@ -106,7 +115,11 @@ describe('RedisCacheService', () => {
       faker.string.sample(),
     );
     const value = fakeJson();
-    await redisClient.hSet(cacheDir.key, cacheDir.field, value);
+    await redisClient.hSet(
+      `${cachePrefix}-${cacheDir.key}`,
+      cacheDir.field,
+      value,
+    );
 
     const storedValue = await redisCacheService.hGet(cacheDir);
 
@@ -120,16 +133,26 @@ describe('RedisCacheService', () => {
       faker.string.sample(),
     );
     const value = fakeJson();
-    await redisClient.hSet(cacheDir.key, cacheDir.field, value);
+    await redisClient.hSet(
+      `${cachePrefix}-${cacheDir.key}`,
+      cacheDir.field,
+      value,
+    );
 
     await redisCacheService.deleteByKey(cacheDir.key);
 
-    const storedValue = await redisClient.hGet(cacheDir.key, cacheDir.field);
+    const storedValue = await redisClient.hGet(
+      `${cachePrefix}-${cacheDir.key}`,
+      cacheDir.field,
+    );
     const invalidationTime = Number(
-      await redisClient.hGet(`invalidationTimeMs:${cacheDir.key}`, ''),
+      await redisClient.hGet(
+        `${cachePrefix}-invalidationTimeMs:${cacheDir.key}`,
+        '',
+      ),
     );
     const invalidationTimeTtl = await redisClient.ttl(
-      `invalidationTimeMs:${cacheDir.key}`,
+      `${cachePrefix}-invalidationTimeMs:${cacheDir.key}`,
     );
     expect(storedValue).toBeNull();
     expect(invalidationTime).toBeGreaterThanOrEqual(startTime);
@@ -145,7 +168,7 @@ describe('RedisCacheService', () => {
     // Connection is closed, this is expected to throw an error
     await expect(redisCacheService.ping()).rejects.toThrow();
     // Connection is reopened after this test execution
-    redisClient = await redisClientFactory(redisDatabase);
+    redisClient = await redisClientFactory();
   });
 
   it('creates a missing key and increments its value', async () => {
@@ -154,7 +177,7 @@ describe('RedisCacheService', () => {
 
     const firstResult = await redisCacheService.increment(key, expireTime);
 
-    const ttl = await redisClient.ttl(key);
+    const ttl = await redisClient.ttl(`${cachePrefix}-${key}`);
     expect(firstResult).toEqual(1);
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(expireTime);
@@ -164,14 +187,16 @@ describe('RedisCacheService', () => {
     const expireTime = faker.number.int({ min: 1 });
     const key = faker.string.alphanumeric();
     const initialValue = faker.number.int({ min: 100 });
-    await redisClient.set(key, initialValue, { EX: expireTime });
+    await redisClient.set(`${cachePrefix}-${key}`, initialValue, {
+      EX: expireTime,
+    });
 
     for (let i = 1; i <= 5; i++) {
       const result = await redisCacheService.increment(key, undefined);
       expect(result).toEqual(initialValue + i);
     }
 
-    const ttl = await redisClient.ttl(key);
+    const ttl = await redisClient.ttl(`${cachePrefix}-${key}`);
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(expireTime);
   });
@@ -215,7 +240,7 @@ describe('RedisCacheService', () => {
 
   it('returns null for a non-numeric counter value', async () => {
     const key = faker.string.alphanumeric();
-    await redisClient.set(key, faker.string.sample());
+    await redisClient.set(`${cachePrefix}-${key}`, faker.string.sample());
 
     const result = await redisCacheService.getCounter(key);
     expect(result).toBeNull();
@@ -232,8 +257,8 @@ describe('RedisCacheService', () => {
       throw new Error('Should not throw');
     }
 
-    const storedValue = await redisClient.hGet(key, '');
-    const ttl = await redisClient.ttl(key);
+    const storedValue = await redisClient.hGet(`${cachePrefix}-${key}`, '');
+    const ttl = await redisClient.ttl(`${cachePrefix}-${key}`);
     expect(storedValue).toEqual(value);
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER);

@@ -1,33 +1,61 @@
+import { redisClientFactory } from '@/__tests__/redis-client.factory';
+import { flushByPrefix } from '@/__tests__/redis-helper';
 import { FakeConfigurationService } from '@/config/__tests__/fake.configuration.service';
-import { GelatoApi } from '@/datasources/relay-api/gelato-api.service';
-import { faker } from '@faker-js/faker';
-import type { INetworkService } from '@/datasources/network/network.service.interface';
-import type { Hex } from 'viem';
-import { getAddress } from 'viem';
+import type { IConfigurationService } from '@/config/configuration.service.interface';
+import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
+import { RedisCacheService } from '@/datasources/cache/redis.cache.service';
 import { HttpErrorFactory } from '@/datasources/errors/http-error-factory';
 import { NetworkResponseError } from '@/datasources/network/entities/network.error.entity';
+import type { INetworkService } from '@/datasources/network/network.service.interface';
+import { GelatoApi } from '@/datasources/relay-api/gelato-api.service';
 import { DataSourceError } from '@/domain/errors/data-source.error';
-import { FakeCacheService } from '@/datasources/cache/__tests__/fake.cache.service';
-import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
+import type { ILoggingService } from '@/logging/logging.interface';
+import { faker } from '@faker-js/faker';
+import type { RedisClientType } from 'redis';
+import type { Hex } from 'viem';
+import { getAddress } from 'viem';
 
 const mockNetworkService = jest.mocked({
   post: jest.fn(),
 } as jest.MockedObjectDeep<INetworkService>);
 
+const mockLoggingService = {
+  debug: jest.fn(),
+  error: jest.fn(),
+  info: jest.fn(),
+  warn: jest.fn(),
+} as jest.MockedObjectDeep<ILoggingService>;
+
+const mockConfigurationService = jest.mocked({
+  getOrThrow: jest.fn(),
+} as jest.MockedObjectDeep<IConfigurationService>);
+
 describe('GelatoApi', () => {
   let target: GelatoApi;
   let fakeConfigurationService: FakeConfigurationService;
-  let fakeCacheService: FakeCacheService;
+  let redisCacheService: RedisCacheService;
+  let redisClient: RedisClientType;
   let baseUri: string;
   let ttlSeconds: number;
   let httpErrorFactory: HttpErrorFactory;
+  const cachePrefix = crypto.randomUUID();
+
+  beforeAll(async () => {
+    redisClient = await redisClientFactory(
+      faker.number.int({ min: 1, max: 10 }),
+    );
+    redisCacheService = new RedisCacheService(
+      redisClient,
+      mockLoggingService,
+      mockConfigurationService,
+      cachePrefix,
+    );
+  });
 
   beforeEach(() => {
     jest.resetAllMocks();
-
     httpErrorFactory = new HttpErrorFactory();
     fakeConfigurationService = new FakeConfigurationService();
-    fakeCacheService = new FakeCacheService();
     baseUri = faker.internet.url({ appendSlash: false });
     ttlSeconds = faker.number.int();
     fakeConfigurationService.set('relay.baseUri', baseUri);
@@ -37,13 +65,20 @@ describe('GelatoApi', () => {
       mockNetworkService,
       fakeConfigurationService,
       httpErrorFactory,
-      fakeCacheService,
+      redisCacheService,
     );
+  });
+
+  afterEach(async () => {
+    await flushByPrefix(redisClient, cachePrefix);
+  });
+
+  afterAll(async () => {
+    await redisClient.quit();
   });
 
   it('should error if baseUri is not defined', () => {
     const fakeConfigurationService = new FakeConfigurationService();
-    const fakeCacheService = new FakeCacheService();
     const httpErrorFactory = new HttpErrorFactory();
 
     expect(
@@ -52,7 +87,7 @@ describe('GelatoApi', () => {
           mockNetworkService,
           fakeConfigurationService,
           httpErrorFactory,
-          fakeCacheService,
+          redisCacheService,
         ),
     ).toThrow();
   });
@@ -173,7 +208,7 @@ describe('GelatoApi', () => {
       const chainId = faker.string.numeric();
       const address = getAddress(faker.finance.ethereumAddress());
       const count = faker.number.int({ min: 1 });
-      await fakeCacheService.hSet(
+      await redisCacheService.hSet(
         new CacheDir(`${chainId}_relay_${address}`, ''),
         count.toString(),
         ttlSeconds,
@@ -212,7 +247,7 @@ describe('GelatoApi', () => {
         count,
       });
 
-      const result = await fakeCacheService.hGet(
+      const result = await redisCacheService.hGet(
         new CacheDir(`${chainId}_relay_${address}`, ''),
       );
       expect(result).toBe(count.toString());

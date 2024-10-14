@@ -1,5 +1,6 @@
 import { TestDbFactory } from '@/__tests__/db.factory';
 import { redisClientFactory } from '@/__tests__/redis-client.factory';
+import { flushByPrefix } from '@/__tests__/redis-helper';
 import type { IConfigurationService } from '@/config/configuration.service.interface';
 import { AccountsDatasource } from '@/datasources/accounts/accounts.datasource';
 import { MAX_TTL } from '@/datasources/cache/constants';
@@ -34,16 +35,15 @@ describe('AccountsDatasource tests', () => {
   let migrator: PostgresDatabaseMigrator;
   let target: AccountsDatasource;
   const testDbFactory = new TestDbFactory();
+  const cachePrefix = crypto.randomUUID();
 
   beforeAll(async () => {
-    redisClient = await redisClientFactory(
-      faker.number.int({ min: 1, max: 10 }),
-    );
+    redisClient = await redisClientFactory();
     redisCacheService = new RedisCacheService(
       redisClient,
       mockLoggingService,
       mockConfigurationService,
-      crypto.randomUUID(),
+      cachePrefix,
     );
     sql = await testDbFactory.createTestDatabase(faker.string.uuid());
     migrator = new PostgresDatabaseMigrator(sql);
@@ -63,7 +63,7 @@ describe('AccountsDatasource tests', () => {
 
   afterEach(async () => {
     await sql`TRUNCATE TABLE accounts, groups, account_data_types CASCADE`;
-    await redisClient.flushAll();
+    await flushByPrefix(redisClient, cachePrefix);
     jest.clearAllMocks();
   });
 

@@ -1,5 +1,6 @@
 import { TestDbFactory } from '@/__tests__/db.factory';
 import { redisClientFactory } from '@/__tests__/redis-client.factory';
+import { flushByPrefix } from '@/__tests__/redis-helper';
 import type { IConfigurationService } from '@/config/configuration.service.interface';
 import { CounterfactualSafesDatasource } from '@/datasources/accounts/counterfactual-safes/counterfactual-safes.datasource';
 import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
@@ -33,6 +34,7 @@ describe('CounterfactualSafesDatasource tests', () => {
   let migrator: PostgresDatabaseMigrator;
   let target: CounterfactualSafesDatasource;
   const testDbFactory = new TestDbFactory();
+  const cachePrefix = crypto.randomUUID();
 
   beforeAll(async () => {
     redisClient = await redisClientFactory(
@@ -42,7 +44,7 @@ describe('CounterfactualSafesDatasource tests', () => {
       redisClient,
       mockLoggingService,
       mockConfigurationService,
-      crypto.randomUUID(),
+      cachePrefix,
     );
     sql = await testDbFactory.createTestDatabase(faker.string.uuid());
     migrator = new PostgresDatabaseMigrator(sql);
@@ -62,7 +64,7 @@ describe('CounterfactualSafesDatasource tests', () => {
 
   afterEach(async () => {
     await sql`TRUNCATE TABLE accounts, account_data_settings, counterfactual_safes CASCADE`;
-    await redisClient.flushAll();
+    await flushByPrefix(redisClient, cachePrefix);
     jest.clearAllMocks();
   });
 

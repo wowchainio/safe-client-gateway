@@ -1,4 +1,5 @@
 import { redisClientFactory } from '@/__tests__/redis-client.factory';
+import { flushByPrefix } from '@/__tests__/redis-helper';
 import { FakeConfigurationService } from '@/config/__tests__/fake.configuration.service';
 import type { IConfigurationService } from '@/config/configuration.service.interface';
 import { BlockchainApiManager } from '@/datasources/blockchain/blockchain-api.manager';
@@ -34,6 +35,7 @@ describe('BlockchainApiManager', () => {
   let redisClient: RedisClientType;
   const infuraApiKey = faker.string.hexadecimal({ length: 32 });
   const expirationTimeInSeconds = faker.number.int();
+  const cachePrefix = crypto.randomUUID();
 
   beforeAll(async () => {
     redisClient = await redisClientFactory(
@@ -43,7 +45,7 @@ describe('BlockchainApiManager', () => {
       redisClient,
       mockLoggingService,
       mockConfigurationService,
-      crypto.randomUUID(),
+      cachePrefix,
     );
     const fakeConfigurationService = new FakeConfigurationService();
     fakeConfigurationService.set('blockchain.infura.apiKey', infuraApiKey);
@@ -60,7 +62,7 @@ describe('BlockchainApiManager', () => {
 
   afterEach(async () => {
     jest.resetAllMocks();
-    await redisClient.flushAll();
+    await flushByPrefix(redisClient, cachePrefix);
   });
 
   afterAll(async () => {

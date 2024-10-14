@@ -80,11 +80,12 @@ export class RedisCacheService
     cacheKey: string,
     expireTimeSeconds: number | undefined,
   ): Promise<number> {
-    const transaction = this.client.multi().incr(cacheKey);
+    const key = this._prefixKey(cacheKey);
+    const transaction = this.client.multi().incr(key);
     if (expireTimeSeconds !== undefined && expireTimeSeconds > 0) {
-      transaction.expire(cacheKey, expireTimeSeconds, 'NX');
+      transaction.expire(key, expireTimeSeconds, 'NX');
     }
-    const [incrRes] = await transaction.get(cacheKey).exec();
+    const [incrRes] = await transaction.get(key).exec();
     return Number(incrRes);
   }
 
@@ -93,7 +94,10 @@ export class RedisCacheService
     value: number,
     expireTimeSeconds: number,
   ): Promise<void> {
-    await this.client.set(key, value, { EX: expireTimeSeconds, NX: true });
+    await this.client.set(this._prefixKey(key), value, {
+      EX: expireTimeSeconds,
+      NX: true,
+    });
   }
 
   /**

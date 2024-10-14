@@ -1,11 +1,15 @@
 import { fakeJson } from '@/__tests__/faker';
-import { FakeCacheService } from '@/datasources/cache/__tests__/fake.cache.service';
+import { redisClientFactory } from '@/__tests__/redis-client.factory';
+import { flushByPrefix } from '@/__tests__/redis-helper';
+import type { IConfigurationService } from '@/config/configuration.service.interface';
+import { RedisCacheService } from '@/datasources/cache/redis.cache.service';
 import { CachedQueryResolver } from '@/datasources/db/cached-query-resolver';
 import type { ILoggingService } from '@/logging/logging.interface';
 import { faker } from '@faker-js/faker';
 import { InternalServerErrorException } from '@nestjs/common';
-import type { MaybeRow } from 'postgres';
 import type postgres from 'postgres';
+import type { MaybeRow } from 'postgres';
+import type { RedisClientType } from 'redis';
 
 const mockLoggingService = jest.mocked({
   debug: jest.fn(),
@@ -16,18 +20,34 @@ const mockQuery = jest.mocked({
   execute: jest.fn(),
 } as jest.MockedObjectDeep<postgres.PendingQuery<MaybeRow[]>>);
 
-describe('CachedQueryResolver', () => {
-  let fakeCacheService: FakeCacheService;
-  let target: CachedQueryResolver;
+const mockConfigurationService = jest.mocked({
+  getOrThrow: jest.fn(),
+} as jest.MockedObjectDeep<IConfigurationService>);
 
-  beforeAll(() => {
-    fakeCacheService = new FakeCacheService();
-    target = new CachedQueryResolver(mockLoggingService, fakeCacheService);
+describe('CachedQueryResolver', () => {
+  let redisCacheService: RedisCacheService;
+  let redisClient: RedisClientType;
+  let target: CachedQueryResolver;
+  const cachePrefix = crypto.randomUUID();
+
+  beforeAll(async () => {
+    redisClient = await redisClientFactory();
+    redisCacheService = new RedisCacheService(
+      redisClient,
+      mockLoggingService,
+      mockConfigurationService,
+      cachePrefix,
+    );
+    target = new CachedQueryResolver(mockLoggingService, redisCacheService);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     jest.clearAllMocks();
-    fakeCacheService.clear();
+    await flushByPrefix(redisClient, cachePrefix);
+  });
+
+  afterAll(async () => {
+    await redisClient.quit();
   });
 
   describe('get', () => {
@@ -35,7 +55,7 @@ describe('CachedQueryResolver', () => {
       const cacheDir = { key: 'key', field: 'field' };
       const ttl = faker.number.int({ min: 1, max: 1000 });
       const value = fakeJson();
-      await fakeCacheService.hSet(cacheDir, JSON.stringify(value), ttl);
+      await redisCacheService.hSet(cacheDir, JSON.stringify(value), ttl);
 
       const actual = await target.get({
         cacheDir,
@@ -69,7 +89,7 @@ describe('CachedQueryResolver', () => {
         key: 'key',
         field: 'field',
       });
-      const cacheContent = await fakeCacheService.hGet(cacheDir);
+      const cacheContent = await redisCacheService.hGet(cacheDir);
       expect(cacheContent).toBe(JSON.stringify(dbResult));
     });
 

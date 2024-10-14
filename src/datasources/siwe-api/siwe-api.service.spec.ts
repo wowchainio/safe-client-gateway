@@ -1,21 +1,57 @@
+import { redisClientFactory } from '@/__tests__/redis-client.factory';
+import { flushByPrefix } from '@/__tests__/redis-helper';
 import { FakeConfigurationService } from '@/config/__tests__/fake.configuration.service';
-import { SiweApi } from '@/datasources/siwe-api/siwe-api.service';
-import { FakeCacheService } from '@/datasources/cache/__tests__/fake.cache.service';
+import type { IConfigurationService } from '@/config/configuration.service.interface';
 import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
+import { RedisCacheService } from '@/datasources/cache/redis.cache.service';
+import { SiweApi } from '@/datasources/siwe-api/siwe-api.service';
+import type { ILoggingService } from '@/logging/logging.interface';
 import { faker } from '@faker-js/faker';
+import type { RedisClientType } from 'redis';
+
+const mockLoggingService = {
+  debug: jest.fn(),
+  error: jest.fn(),
+  info: jest.fn(),
+  warn: jest.fn(),
+} as jest.MockedObjectDeep<ILoggingService>;
+
+const mockConfigurationService = jest.mocked({
+  getOrThrow: jest.fn(),
+} as jest.MockedObjectDeep<IConfigurationService>);
 
 describe('SiweApiService', () => {
   let service: SiweApi;
   let fakeConfigurationService: FakeConfigurationService;
-  let fakeCacheService: FakeCacheService;
+  let redisCacheService: RedisCacheService;
+  let redisClient: RedisClientType;
   const nonceTtlInSeconds = faker.number.int();
+  const cachePrefix = crypto.randomUUID();
+
+  beforeAll(async () => {
+    redisClient = await redisClientFactory();
+    redisCacheService = new RedisCacheService(
+      redisClient,
+      mockLoggingService,
+      mockConfigurationService,
+      cachePrefix,
+    );
+  });
 
   beforeEach(() => {
     jest.resetAllMocks();
     fakeConfigurationService = new FakeConfigurationService();
-    fakeCacheService = new FakeCacheService();
     fakeConfigurationService.set('auth.nonceTtlSeconds', nonceTtlInSeconds);
-    service = new SiweApi(fakeConfigurationService, fakeCacheService);
+    service = new SiweApi(fakeConfigurationService, redisCacheService);
+  });
+
+  afterEach(async () => {
+    await flushByPrefix(redisClient, cachePrefix);
+    jest.clearAllMocks();
+  });
+
+  afterAll(async () => {
+    await redisClient.quit();
   });
 
   describe('storeNonce', () => {
@@ -25,7 +61,7 @@ describe('SiweApiService', () => {
       await service.storeNonce(nonce);
 
       await expect(
-        fakeCacheService.hGet(new CacheDir(`auth_nonce_${nonce}`, '')),
+        redisCacheService.hGet(new CacheDir(`auth_nonce_${nonce}`, '')),
       ).resolves.toBe(nonce);
     });
   });
@@ -49,8 +85,8 @@ describe('SiweApiService', () => {
       await service.clearNonce(nonce);
 
       await expect(
-        fakeCacheService.hGet(new CacheDir(`auth_nonce_${nonce}`, '')),
-      ).resolves.toBe(undefined);
+        redisCacheService.hGet(new CacheDir(`auth_nonce_${nonce}`, '')),
+      ).resolves.toBe(null);
     });
   });
 });

@@ -1,4 +1,5 @@
 import { redisClientFactory } from '@/__tests__/redis-client.factory';
+import { flushByPrefix } from '@/__tests__/redis-helper';
 import { FakeConfigurationService } from '@/config/__tests__/fake.configuration.service';
 import type { IConfigurationService } from '@/config/configuration.service.interface';
 import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
@@ -40,7 +41,7 @@ describe('FirebaseCloudMessagingApiService', () => {
   let target: FirebaseCloudMessagingApiService;
   let redisCacheService: RedisCacheService;
   let redisClient: RedisClientType;
-
+  const cachePrefix = crypto.randomUUID();
   let pushNotificationsBaseUri: string;
   let pushNotificationsProject: string;
   let pushNotificationsServiceAccountClientEmail: string;
@@ -54,7 +55,7 @@ describe('FirebaseCloudMessagingApiService', () => {
       redisClient,
       mockLoggingService,
       mockConfigurationService,
-      crypto.randomUUID(),
+      cachePrefix,
     );
   });
 
@@ -93,7 +94,7 @@ describe('FirebaseCloudMessagingApiService', () => {
   });
 
   afterEach(async () => {
-    await redisClient.flushAll();
+    await flushByPrefix(redisClient, cachePrefix);
   });
 
   afterAll(async () => {
