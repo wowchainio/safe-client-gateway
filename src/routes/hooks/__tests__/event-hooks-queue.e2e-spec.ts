@@ -47,7 +47,9 @@ describe('Events queue processing e2e tests', () => {
 
     app = await new TestAppProvider().provide(moduleRef);
     await app.init();
-    redisClient = await redisClientFactory();
+    redisClient = await redisClientFactory(
+      faker.number.int({ min: 1, max: 10 }),
+    );
     const amqpClient = amqpClientFactory(queue);
     channel = amqpClient.channel;
     queueName = amqpClient.queueName;

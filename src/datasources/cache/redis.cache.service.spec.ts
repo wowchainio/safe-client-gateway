@@ -26,9 +26,10 @@ describe('RedisCacheService', () => {
   let defaultExpirationTimeInSeconds: number;
   const keyPrefix = '';
   let redisClient: RedisClientType;
+  const redisDatabase = faker.number.int({ min: 1, max: 10 });
 
   beforeAll(async () => {
-    redisClient = await redisClientFactory();
+    redisClient = await redisClientFactory(redisDatabase);
   });
 
   afterAll(async () => {
@@ -144,7 +145,7 @@ describe('RedisCacheService', () => {
     // Connection is closed, this is expected to throw an error
     await expect(redisCacheService.ping()).rejects.toThrow();
     // Connection is reopened after this test execution
-    redisClient = await redisClientFactory();
+    redisClient = await redisClientFactory(redisDatabase);
   });
 
   it('creates a missing key and increments its value', async () => {

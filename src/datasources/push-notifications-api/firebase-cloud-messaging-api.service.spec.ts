@@ -47,7 +47,9 @@ describe('FirebaseCloudMessagingApiService', () => {
   let pushNotificationsServiceAccountPrivateKey: string;
 
   beforeAll(async () => {
-    redisClient = await redisClientFactory();
+    redisClient = await redisClientFactory(
+      faker.number.int({ min: 1, max: 10 }),
+    );
     redisCacheService = new RedisCacheService(
       redisClient,
       mockLoggingService,

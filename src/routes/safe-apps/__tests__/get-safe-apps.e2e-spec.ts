@@ -8,6 +8,7 @@ import { redisClientFactory } from '@/__tests__/redis-client.factory';
 import { CacheKeyPrefix } from '@/datasources/cache/constants';
 import type { SafeApp } from '@/routes/safe-apps/entities/safe-app.entity';
 import type { Server } from 'net';
+import { faker } from '@faker-js/faker';
 
 describe('Get Safe Apps e2e test', () => {
   let app: INestApplication<Server>;
@@ -25,7 +26,9 @@ describe('Get Safe Apps e2e test', () => {
 
     app = await new TestAppProvider().provide(moduleRef);
     await app.init();
-    redisClient = await redisClientFactory();
+    redisClient = await redisClientFactory(
+      faker.number.int({ min: 1, max: 10 }),
+    );
   });
 
   afterAll(async () => {

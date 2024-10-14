@@ -7,6 +7,7 @@ import { redisClientFactory } from '@/__tests__/redis-client.factory';
 import { TestAppProvider } from '@/__tests__/test-app.provider';
 import { CacheKeyPrefix } from '@/datasources/cache/constants';
 import type { Server } from 'net';
+import { faker } from '@faker-js/faker';
 
 describe('Get contract e2e test', () => {
   let app: INestApplication<Server>;
@@ -24,7 +25,9 @@ describe('Get contract e2e test', () => {
 
     app = await new TestAppProvider().provide(moduleRef);
     await app.init();
-    redisClient = await redisClientFactory();
+    redisClient = await redisClientFactory(
+      faker.number.int({ min: 1, max: 10 }),
+    );
   });
 
   afterAll(async () => {
