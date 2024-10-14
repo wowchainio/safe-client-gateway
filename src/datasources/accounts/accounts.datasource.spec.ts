@@ -1,9 +1,10 @@
 import { TestDbFactory } from '@/__tests__/db.factory';
+import { redisClientFactory } from '@/__tests__/redis-client.factory';
 import type { IConfigurationService } from '@/config/configuration.service.interface';
 import { AccountsDatasource } from '@/datasources/accounts/accounts.datasource';
-import { FakeCacheService } from '@/datasources/cache/__tests__/fake.cache.service';
 import { MAX_TTL } from '@/datasources/cache/constants';
 import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
+import { RedisCacheService } from '@/datasources/cache/redis.cache.service';
 import { CachedQueryResolver } from '@/datasources/db/cached-query-resolver';
 import { PostgresDatabaseMigrator } from '@/datasources/db/postgres-database.migrator';
 import { accountDataTypeBuilder } from '@/domain/accounts/entities/__tests__/account-data-type.builder';
@@ -12,6 +13,7 @@ import type { AccountDataType } from '@/domain/accounts/entities/account-data-ty
 import type { ILoggingService } from '@/logging/logging.interface';
 import { faker } from '@faker-js/faker';
 import type postgres from 'postgres';
+import type { RedisClientType } from 'redis';
 import { getAddress } from 'viem';
 
 const mockLoggingService = {
@@ -26,14 +28,21 @@ const mockConfigurationService = jest.mocked({
 } as jest.MockedObjectDeep<IConfigurationService>);
 
 describe('AccountsDatasource tests', () => {
-  let fakeCacheService: FakeCacheService;
+  let redisCacheService: RedisCacheService;
+  let redisClient: RedisClientType;
   let sql: postgres.Sql;
   let migrator: PostgresDatabaseMigrator;
   let target: AccountsDatasource;
   const testDbFactory = new TestDbFactory();
 
   beforeAll(async () => {
-    fakeCacheService = new FakeCacheService();
+    redisClient = await redisClientFactory();
+    redisCacheService = new RedisCacheService(
+      redisClient,
+      mockLoggingService,
+      mockConfigurationService,
+      crypto.randomUUID(),
+    );
     sql = await testDbFactory.createTestDatabase(faker.string.uuid());
     migrator = new PostgresDatabaseMigrator(sql);
     await migrator.migrate();
@@ -42,9 +51,9 @@ describe('AccountsDatasource tests', () => {
     });
 
     target = new AccountsDatasource(
-      fakeCacheService,
+      redisCacheService,
       sql,
-      new CachedQueryResolver(mockLoggingService, fakeCacheService),
+      new CachedQueryResolver(mockLoggingService, redisCacheService),
       mockLoggingService,
       mockConfigurationService,
     );
@@ -52,12 +61,13 @@ describe('AccountsDatasource tests', () => {
 
   afterEach(async () => {
     await sql`TRUNCATE TABLE accounts, groups, account_data_types CASCADE`;
-    fakeCacheService.clear();
+    await redisClient.flushAll();
     jest.clearAllMocks();
   });
 
   afterAll(async () => {
     await testDbFactory.destroyTestDatabase(sql);
+    await redisClient.quit();
   });
 
   describe('createAccount', () => {
@@ -79,7 +89,7 @@ describe('AccountsDatasource tests', () => {
 
       // check the account is stored in the cache
       const cacheDir = new CacheDir(`account_${address}`, '');
-      const cacheContent = await fakeCacheService.hGet(cacheDir);
+      const cacheContent = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(cacheContent as string)).toStrictEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -109,7 +119,7 @@ describe('AccountsDatasource tests', () => {
 
       // check the account is stored in the cache
       const cacheDir = new CacheDir(`account_${address}`, '');
-      const cacheContent = await fakeCacheService.hGet(cacheDir);
+      const cacheContent = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(cacheContent as string)).toStrictEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -136,9 +146,9 @@ describe('AccountsDatasource tests', () => {
           return faker.number.int({ min: 10 });
       });
       target = new AccountsDatasource(
-        fakeCacheService,
+        redisCacheService,
         sql,
-        new CachedQueryResolver(mockLoggingService, fakeCacheService),
+        new CachedQueryResolver(mockLoggingService, redisCacheService),
         mockLoggingService,
         mockConfigurationService,
       );
@@ -177,9 +187,9 @@ describe('AccountsDatasource tests', () => {
           return faker.number.int({ min: 10 });
       });
       target = new AccountsDatasource(
-        fakeCacheService,
+        redisCacheService,
         sql,
-        new CachedQueryResolver(mockLoggingService, fakeCacheService),
+        new CachedQueryResolver(mockLoggingService, redisCacheService),
         mockLoggingService,
         mockConfigurationService,
       );
@@ -235,7 +245,7 @@ describe('AccountsDatasource tests', () => {
         }),
       );
       const cacheDir = new CacheDir(`account_${address}`, '');
-      const cacheContent = await fakeCacheService.hGet(cacheDir);
+      const cacheContent = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(cacheContent as string)).toStrictEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -315,7 +325,7 @@ describe('AccountsDatasource tests', () => {
         `account_data_settings_${address}`,
         '',
       );
-      await fakeCacheService.hSet(
+      await redisCacheService.hSet(
         accountDataSettingsCacheDir,
         faker.string.alpha(),
         MAX_TTL,
@@ -324,7 +334,7 @@ describe('AccountsDatasource tests', () => {
         `counterfactual_safes_${address}`,
         '',
       );
-      await fakeCacheService.hSet(
+      await redisCacheService.hSet(
         counterfactualSafesCacheDir,
         faker.string.alpha(),
         MAX_TTL,
@@ -334,18 +344,18 @@ describe('AccountsDatasource tests', () => {
       await expect(target.deleteAccount(address)).resolves.not.toThrow();
       await expect(target.getAccount(address)).rejects.toThrow();
       const accountCacheDir = new CacheDir(`account_${address}`, '');
-      const cached = await fakeCacheService.hGet(accountCacheDir);
-      expect(cached).toBeUndefined();
+      const cached = await redisCacheService.hGet(accountCacheDir);
+      expect(cached).toBeNull();
 
       // the settings and counterfactual safes are deleted from the cache
-      const accountDataSettingsCached = await fakeCacheService.hGet(
+      const accountDataSettingsCached = await redisCacheService.hGet(
         accountDataSettingsCacheDir,
       );
-      expect(accountDataSettingsCached).toBeUndefined();
-      const counterfactualSafesCached = await fakeCacheService.hGet(
+      expect(accountDataSettingsCached).toBeNull();
+      const counterfactualSafesCached = await redisCacheService.hGet(
         counterfactualSafesCacheDir,
       );
-      expect(counterfactualSafesCached).toBeUndefined();
+      expect(counterfactualSafesCached).toBeNull();
 
       expect(mockLoggingService.debug).toHaveBeenCalledTimes(2);
       expect(mockLoggingService.debug).toHaveBeenNthCalledWith(1, {
@@ -412,7 +422,7 @@ describe('AccountsDatasource tests', () => {
         ),
       );
       const cacheDir = new CacheDir('account_data_types', '');
-      const cacheContent = await fakeCacheService.hGet(cacheDir);
+      const cacheContent = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(cacheContent as string)).toStrictEqual(
         expect.arrayContaining(
           dataTypes.map((dataType) =>
@@ -508,7 +518,7 @@ describe('AccountsDatasource tests', () => {
       );
 
       expect(actual).toStrictEqual(expect.arrayContaining(expected));
-      const cacheContent = await fakeCacheService.hGet(
+      const cacheContent = await redisCacheService.hGet(
         new CacheDir(`account_data_settings_${address}`, ''),
       );
       expect(JSON.parse(cacheContent as string)).toStrictEqual(
@@ -644,7 +654,7 @@ describe('AccountsDatasource tests', () => {
 
       // check the account data settings are stored in the cache
       const cacheDir = new CacheDir(`account_data_settings_${address}`, '');
-      const cacheContent = await fakeCacheService.hGet(cacheDir);
+      const cacheContent = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(cacheContent as string)).toStrictEqual(
         expect.arrayContaining(
           accountDataSettings.map((accountDataSetting) =>

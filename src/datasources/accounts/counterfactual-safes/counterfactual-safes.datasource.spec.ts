@@ -1,8 +1,9 @@
 import { TestDbFactory } from '@/__tests__/db.factory';
+import { redisClientFactory } from '@/__tests__/redis-client.factory';
 import type { IConfigurationService } from '@/config/configuration.service.interface';
 import { CounterfactualSafesDatasource } from '@/datasources/accounts/counterfactual-safes/counterfactual-safes.datasource';
-import { FakeCacheService } from '@/datasources/cache/__tests__/fake.cache.service';
 import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
+import { RedisCacheService } from '@/datasources/cache/redis.cache.service';
 import { CachedQueryResolver } from '@/datasources/db/cached-query-resolver';
 import { PostgresDatabaseMigrator } from '@/datasources/db/postgres-database.migrator';
 import { createCounterfactualSafeDtoBuilder } from '@/domain/accounts/counterfactual-safes/entities/__tests__/create-counterfactual-safe.dto.entity.builder';
@@ -11,6 +12,7 @@ import type { Account } from '@/domain/accounts/entities/account.entity';
 import type { ILoggingService } from '@/logging/logging.interface';
 import { faker } from '@faker-js/faker';
 import type postgres from 'postgres';
+import type { RedisClientType } from 'redis';
 import { getAddress } from 'viem';
 
 const mockLoggingService = {
@@ -25,14 +27,21 @@ const mockConfigurationService = jest.mocked({
 } as jest.MockedObjectDeep<IConfigurationService>);
 
 describe('CounterfactualSafesDatasource tests', () => {
-  let fakeCacheService: FakeCacheService;
+  let redisCacheService: RedisCacheService;
+  let redisClient: RedisClientType;
   let sql: postgres.Sql;
   let migrator: PostgresDatabaseMigrator;
   let target: CounterfactualSafesDatasource;
   const testDbFactory = new TestDbFactory();
 
   beforeAll(async () => {
-    fakeCacheService = new FakeCacheService();
+    redisClient = await redisClientFactory();
+    redisCacheService = new RedisCacheService(
+      redisClient,
+      mockLoggingService,
+      mockConfigurationService,
+      crypto.randomUUID(),
+    );
     sql = await testDbFactory.createTestDatabase(faker.string.uuid());
     migrator = new PostgresDatabaseMigrator(sql);
     await migrator.migrate();
@@ -41,9 +50,9 @@ describe('CounterfactualSafesDatasource tests', () => {
     });
 
     target = new CounterfactualSafesDatasource(
-      fakeCacheService,
+      redisCacheService,
       sql,
-      new CachedQueryResolver(mockLoggingService, fakeCacheService),
+      new CachedQueryResolver(mockLoggingService, redisCacheService),
       mockLoggingService,
       mockConfigurationService,
     );
@@ -51,12 +60,13 @@ describe('CounterfactualSafesDatasource tests', () => {
 
   afterEach(async () => {
     await sql`TRUNCATE TABLE accounts, account_data_settings, counterfactual_safes CASCADE`;
-    fakeCacheService.clear();
+    await redisClient.flushAll();
     jest.clearAllMocks();
   });
 
   afterAll(async () => {
     await testDbFactory.destroyTestDatabase(sql);
+    await redisClient.quit();
   });
 
   describe('createCounterfactualSafe', () => {
@@ -114,9 +124,9 @@ describe('CounterfactualSafesDatasource tests', () => {
       });
 
       target = new CounterfactualSafesDatasource(
-        fakeCacheService,
+        redisCacheService,
         sql,
-        new CachedQueryResolver(mockLoggingService, fakeCacheService),
+        new CachedQueryResolver(mockLoggingService, redisCacheService),
         mockLoggingService,
         mockConfigurationService,
       );
@@ -176,9 +186,9 @@ describe('CounterfactualSafesDatasource tests', () => {
       });
 
       target = new CounterfactualSafesDatasource(
-        fakeCacheService,
+        redisCacheService,
         sql,
-        new CachedQueryResolver(mockLoggingService, fakeCacheService),
+        new CachedQueryResolver(mockLoggingService, redisCacheService),
         mockLoggingService,
         mockConfigurationService,
       );
@@ -212,7 +222,7 @@ describe('CounterfactualSafesDatasource tests', () => {
       });
       await target.getCounterfactualSafesForAddress(address);
       const cacheDir = new CacheDir(`counterfactual_safes_${address}`, '');
-      await fakeCacheService.hSet(
+      await redisCacheService.hSet(
         cacheDir,
         JSON.stringify([]),
         faker.number.int(),
@@ -224,7 +234,7 @@ describe('CounterfactualSafesDatasource tests', () => {
         createCounterfactualSafeDto:
           createCounterfactualSafeDtoBuilder().build(),
       });
-      expect(await fakeCacheService.hGet(cacheDir)).toBeUndefined();
+      expect(await redisCacheService.hGet(cacheDir)).toBeNull();
     });
   });
 
@@ -276,7 +286,7 @@ describe('CounterfactualSafesDatasource tests', () => {
         `${counterfactualSafe.chain_id}_counterfactual_safe_${counterfactualSafe.predicted_address}`,
         '',
       );
-      const cacheContent = await fakeCacheService.hGet(cacheDir);
+      const cacheContent = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(cacheContent as string)).toHaveLength(1);
       expect(mockLoggingService.debug).toHaveBeenCalledTimes(2);
       expect(mockLoggingService.debug).toHaveBeenNthCalledWith(1, {
@@ -315,7 +325,7 @@ describe('CounterfactualSafesDatasource tests', () => {
         `${counterfactualSafe.chainId}_counterfactual_safe_${counterfactualSafe.predictedAddress}`,
         '',
       );
-      expect(await fakeCacheService.hGet(cacheDir)).toBeUndefined();
+      expect(await redisCacheService.hGet(cacheDir)).toBeNull();
       expect(mockLoggingService.debug).toHaveBeenCalledTimes(2);
       expect(mockLoggingService.debug).toHaveBeenNthCalledWith(1, {
         type: 'cache_miss',
@@ -381,7 +391,7 @@ describe('CounterfactualSafesDatasource tests', () => {
 
       expect(actual).toStrictEqual(expect.arrayContaining(counterfactualSafes));
       const cacheDir = new CacheDir(`counterfactual_safes_${address}`, '');
-      const cacheContent = await fakeCacheService.hGet(cacheDir);
+      const cacheContent = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(cacheContent as string)).toHaveLength(2);
       expect(mockLoggingService.debug).toHaveBeenCalledTimes(2);
       expect(mockLoggingService.debug).toHaveBeenNthCalledWith(1, {
@@ -453,7 +463,7 @@ describe('CounterfactualSafesDatasource tests', () => {
         `${counterfactualSafe.chain_id}_counterfactual_safe_${counterfactualSafe.predicted_address}`,
         '',
       );
-      const beforeDeletion = await fakeCacheService.hGet(cacheDir);
+      const beforeDeletion = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(beforeDeletion as string)).toHaveLength(1);
 
       // the counterfactualSafe is deleted from the database and the cache
@@ -472,14 +482,14 @@ describe('CounterfactualSafesDatasource tests', () => {
         }),
       ).rejects.toThrow();
 
-      const afterDeletion = await fakeCacheService.hGet(cacheDir);
-      expect(afterDeletion).toBeUndefined();
+      const afterDeletion = await redisCacheService.hGet(cacheDir);
+      expect(afterDeletion).toBeNull();
       const cacheDirByAddress = new CacheDir(
         `counterfactual_safes_${address}`,
         '',
       );
-      const cachedByAddress = await fakeCacheService.hGet(cacheDirByAddress);
-      expect(cachedByAddress).toBeUndefined();
+      const cachedByAddress = await redisCacheService.hGet(cacheDirByAddress);
+      expect(cachedByAddress).toBeNull();
     });
   });
 
@@ -529,14 +539,14 @@ describe('CounterfactualSafesDatasource tests', () => {
       expect(actual).toHaveLength(0);
       // cache is cleared
       expect(
-        await fakeCacheService.hGet(counterfactualSafesCacheDir),
-      ).toBeUndefined();
+        await redisCacheService.hGet(counterfactualSafesCacheDir),
+      ).toBeNull();
       expect(
-        await fakeCacheService.hGet(counterfactualSafeCacheDirs[0]),
-      ).toBeUndefined();
+        await redisCacheService.hGet(counterfactualSafeCacheDirs[0]),
+      ).toBeNull();
       expect(
-        await fakeCacheService.hGet(counterfactualSafeCacheDirs[1]),
-      ).toBeUndefined();
+        await redisCacheService.hGet(counterfactualSafeCacheDirs[1]),
+      ).toBeNull();
     });
   });
 });
