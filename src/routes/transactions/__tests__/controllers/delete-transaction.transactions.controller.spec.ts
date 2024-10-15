@@ -1,48 +1,43 @@
+import { flushByPrefix } from '@/__tests__/redis-helper';
+import { TestAppProvider } from '@/__tests__/test-app.provider';
+import { AppModule } from '@/app.module';
+import { IConfigurationService } from '@/config/configuration.service.interface';
+import configuration from '@/config/entities/__tests__/configuration';
+import { CacheService } from '@/datasources/cache/cache.service.interface';
+import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
+import type { RedisCacheService } from '@/datasources/cache/redis.cache.service';
+import { TestNetworkModule } from '@/datasources/network/__tests__/test.network.module';
+import { NetworkResponseError } from '@/datasources/network/entities/network.error.entity';
+import { NetworkModule } from '@/datasources/network/network.module';
+import type { INetworkService } from '@/datasources/network/network.service.interface';
+import { NetworkService } from '@/datasources/network/network.service.interface';
+import { TestQueuesApiModule } from '@/datasources/queues/__tests__/test.queues-api.module';
+import { QueuesApiModule } from '@/datasources/queues/queues-api.module';
+import { chainBuilder } from '@/domain/chains/entities/__tests__/chain.builder';
+import {
+  toJson as multisigToJson,
+  multisigTransactionBuilder,
+} from '@/domain/safe/entities/__tests__/multisig-transaction.builder';
+import { TestLoggingModule } from '@/logging/__tests__/test.logging.module';
+import { RequestScopedLoggingModule } from '@/logging/logging.module';
+import type { DeleteTransactionDto } from '@/routes/transactions/entities/delete-transaction.dto.entity';
 import { faker } from '@faker-js/faker';
 import type { INestApplication } from '@nestjs/common';
 import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
-import request from 'supertest';
-import { TestAppProvider } from '@/__tests__/test-app.provider';
-import { TestCacheModule } from '@/datasources/cache/__tests__/test.cache.module';
-import { TestNetworkModule } from '@/datasources/network/__tests__/test.network.module';
-import { chainBuilder } from '@/domain/chains/entities/__tests__/chain.builder';
-import { TestLoggingModule } from '@/logging/__tests__/test.logging.module';
-import configuration from '@/config/entities/__tests__/configuration';
-import { IConfigurationService } from '@/config/configuration.service.interface';
-import type { INetworkService } from '@/datasources/network/network.service.interface';
-import { NetworkService } from '@/datasources/network/network.service.interface';
-import type { DeleteTransactionDto } from '@/routes/transactions/entities/delete-transaction.dto.entity';
-import { AppModule } from '@/app.module';
-import { CacheModule } from '@/datasources/cache/cache.module';
-import { NetworkModule } from '@/datasources/network/network.module';
-import { RequestScopedLoggingModule } from '@/logging/logging.module';
-import { NetworkResponseError } from '@/datasources/network/entities/network.error.entity';
-import {
-  multisigTransactionBuilder,
-  toJson as multisigToJson,
-} from '@/domain/safe/entities/__tests__/multisig-transaction.builder';
-import { CacheService } from '@/datasources/cache/cache.service.interface';
-import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
-import type { FakeCacheService } from '@/datasources/cache/__tests__/fake.cache.service';
-import { TestQueuesApiModule } from '@/datasources/queues/__tests__/test.queues-api.module';
-import { QueuesApiModule } from '@/datasources/queues/queues-api.module';
 import type { Server } from 'net';
+import request from 'supertest';
 
 describe('Delete Transaction - Transactions Controller (Unit', () => {
   let app: INestApplication<Server>;
   let safeConfigUrl: string;
   let networkService: jest.MockedObjectDeep<INetworkService>;
-  let fakeCacheService: FakeCacheService;
+  let redisCacheService: RedisCacheService;
 
-  beforeEach(async () => {
-    jest.resetAllMocks();
-
+  beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule.register(configuration)],
     })
-      .overrideModule(CacheModule)
-      .useModule(TestCacheModule)
       .overrideModule(RequestScopedLoggingModule)
       .useModule(TestLoggingModule)
       .overrideModule(NetworkModule)
@@ -56,10 +51,20 @@ describe('Delete Transaction - Transactions Controller (Unit', () => {
     );
     safeConfigUrl = configurationService.getOrThrow('safeConfig.baseUri');
     networkService = moduleFixture.get(NetworkService);
-    fakeCacheService = moduleFixture.get(CacheService);
+    redisCacheService = moduleFixture.get(CacheService);
 
     app = await new TestAppProvider().provide(moduleFixture);
     await app.init();
+  });
+
+  beforeEach(() => jest.resetAllMocks());
+
+  afterEach(async () => {
+    jest.clearAllMocks();
+    await flushByPrefix(
+      redisCacheService.getClient(),
+      redisCacheService.getKeyPrefix(),
+    );
   });
 
   afterAll(async () => {
@@ -157,18 +162,18 @@ describe('Delete Transaction - Transactions Controller (Unit', () => {
       .expect(200);
 
     await expect(
-      fakeCacheService.hGet(
+      redisCacheService.hGet(
         new CacheDir(
           `${chain.chainId}_multisig_transaction_${tx.safeTxHash}`,
           '',
         ),
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
     await expect(
-      fakeCacheService.hGet(
+      redisCacheService.hGet(
         new CacheDir(`${chain.chainId}_multisig_transactions_${tx.safe}`, ''),
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
   });
 
   it('should forward an error from the Transaction Service', async () => {
@@ -208,6 +213,8 @@ describe('Delete Transaction - Transactions Controller (Unit', () => {
       return Promise.reject(`No matching rule for url: ${url}`);
     });
 
+    console.log(`/v1/chains/${chain.chainId}/transactions/${tx.safeTxHash}`);
+    console.log(deleteTransactionDto);
     await request(app.getHttpServer())
       .delete(`/v1/chains/${chain.chainId}/transactions/${tx.safeTxHash}`)
       .send(deleteTransactionDto)

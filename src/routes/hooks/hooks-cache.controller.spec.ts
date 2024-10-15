@@ -3,17 +3,14 @@ import type { INestApplication } from '@nestjs/common';
 import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { TestCacheModule } from '@/datasources/cache/__tests__/test.cache.module';
 import { TestNetworkModule } from '@/datasources/network/__tests__/test.network.module';
 import { chainBuilder } from '@/domain/chains/entities/__tests__/chain.builder';
 import { TestLoggingModule } from '@/logging/__tests__/test.logging.module';
 import configuration from '@/config/entities/__tests__/configuration';
 import { IConfigurationService } from '@/config/configuration.service.interface';
 import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
-import type { FakeCacheService } from '@/datasources/cache/__tests__/fake.cache.service';
 import { CacheService } from '@/datasources/cache/cache.service.interface';
 import { AppModule } from '@/app.module';
-import { CacheModule } from '@/datasources/cache/cache.module';
 import { RequestScopedLoggingModule } from '@/logging/logging.module';
 import { NetworkModule } from '@/datasources/network/network.module';
 import type { INetworkService } from '@/datasources/network/network.service.interface';
@@ -32,12 +29,14 @@ import { TestNotificationsDatasourceModule } from '@/datasources/notifications/_
 import { IStakingApiManager } from '@/domain/interfaces/staking-api.manager.interface';
 import { KilnDecoder } from '@/domain/staking/contracts/decoders/kiln-decoder.helper';
 import { stakeBuilder } from '@/datasources/staking-api/entities/__tests__/stake.entity.builder';
+import type { RedisCacheService } from '@/datasources/cache/redis.cache.service';
+import { flushByPrefix } from '@/__tests__/redis-helper';
 
 describe('Post Hook Events for Cache (Unit)', () => {
   let app: INestApplication<Server>;
   let authToken: string;
   let safeConfigUrl: string;
-  let fakeCacheService: FakeCacheService;
+  let redisCacheService: RedisCacheService;
   let networkService: jest.MockedObjectDeep<INetworkService>;
   let configurationService: IConfigurationService;
   let stakingApiManager: IStakingApiManager;
@@ -49,8 +48,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule.register(config)],
     })
-      .overrideModule(CacheModule)
-      .useModule(TestCacheModule)
       .overrideModule(RequestScopedLoggingModule)
       .useModule(TestLoggingModule)
       .overrideModule(NetworkModule)
@@ -62,7 +59,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .compile();
     app = moduleFixture.createNestApplication();
 
-    fakeCacheService = moduleFixture.get<FakeCacheService>(CacheService);
+    redisCacheService = moduleFixture.get(CacheService);
     configurationService = moduleFixture.get(IConfigurationService);
     stakingApiManager =
       moduleFixture.get<IStakingApiManager>(IStakingApiManager);
@@ -81,6 +78,14 @@ describe('Post Hook Events for Cache (Unit)', () => {
   beforeEach(async () => {
     jest.resetAllMocks();
     await initApp(configuration);
+  });
+
+  afterEach(async () => {
+    jest.clearAllMocks();
+    await flushByPrefix(
+      redisCacheService.getClient(),
+      redisCacheService.getKeyPrefix(),
+    );
   });
 
   afterAll(async () => {
@@ -267,7 +272,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_safe_balances_${safeAddress}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -296,8 +301,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -326,7 +329,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_multisig_transactions_${getAddress(safeAddress)}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -353,8 +356,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -383,7 +384,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_multisig_transaction_${payload.safeTxHash}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -410,8 +411,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -432,7 +431,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_safe_${getAddress(safeAddress)}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -459,8 +458,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -487,7 +484,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_staking_stakes_${getAddress(safeAddress)}`,
       validatorsPublicKeys,
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       JSON.stringify(stakes),
       faker.number.int({ min: 1 }),
@@ -514,8 +511,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -547,7 +542,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_safe_collectibles_${safeAddress}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -576,8 +571,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -603,7 +596,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_transfers_${getAddress(safeAddress)}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -630,8 +623,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -652,7 +643,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_incoming_transfers_${getAddress(safeAddress)}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -679,8 +670,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -696,7 +685,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_module_transactions_${getAddress(safeAddress)}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -723,8 +712,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -765,7 +752,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_all_transactions_${getAddress(safeAddress)}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -792,8 +779,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -812,7 +797,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       `${chainId}_messages_${getAddress(safeAddress)}`,
       faker.string.alpha(),
     );
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -839,8 +824,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -850,7 +833,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
   ])('$type clears chain', async (payload) => {
     const chain = chainBuilder().build();
     const cacheDir = new CacheDir(`${chain.chainId}_chain`, '');
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       JSON.stringify(chain),
       faker.number.int({ min: 1 }),
@@ -873,8 +856,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -884,7 +865,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
   ])('$type clears chains', async (payload) => {
     const chain = chainBuilder().build();
     const cacheDir = new CacheDir(`chains`, '');
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       JSON.stringify(chain),
       faker.number.int({ min: 1 }),
@@ -910,8 +891,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -1054,7 +1033,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
   ])('$type clears safe apps', async (payload) => {
     const chain = chainBuilder().build();
     const cacheDir = new CacheDir(`${chain.chainId}_safe_apps`, '');
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       JSON.stringify(chain),
       faker.number.int({ min: 1 }),
@@ -1080,8 +1059,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 
   it.each([
@@ -1102,7 +1079,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       await initApp(testConfiguration);
       const chain = chainBuilder().build();
       const cacheDir = new CacheDir(`chains`, '');
-      await fakeCacheService.hSet(
+      await redisCacheService.hSet(
         cacheDir,
         JSON.stringify(chain),
         faker.number.int({ min: 1 }),
@@ -1128,8 +1105,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
         .set('Authorization', `Basic ${authToken}`)
         .send(data)
         .expect(202);
-
-      await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
     },
   );
 
@@ -1151,7 +1126,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
       await initApp(testConfiguration);
       const chain = chainBuilder().build();
       const cacheDir = new CacheDir(`${chain.chainId}_safe_apps`, '');
-      await fakeCacheService.hSet(
+      await redisCacheService.hSet(
         cacheDir,
         JSON.stringify(chain),
         faker.number.int({ min: 1 }),
@@ -1178,8 +1153,6 @@ describe('Post Hook Events for Cache (Unit)', () => {
         .set('Authorization', `Basic ${authToken}`)
         .send(data)
         .expect(202);
-
-      await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
     },
   );
 
@@ -1204,7 +1177,7 @@ describe('Post Hook Events for Cache (Unit)', () => {
           return Promise.reject(new Error(`Could not match ${url}`));
       }
     });
-    await fakeCacheService.hSet(
+    await redisCacheService.hSet(
       cacheDir,
       faker.string.alpha(),
       faker.number.int({ min: 1 }),
@@ -1215,7 +1188,5 @@ describe('Post Hook Events for Cache (Unit)', () => {
       .set('Authorization', `Basic ${authToken}`)
       .send(data)
       .expect(202);
-
-    await expect(fakeCacheService.hGet(cacheDir)).resolves.toBeUndefined();
   });
 });

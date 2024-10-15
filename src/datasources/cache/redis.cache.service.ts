@@ -1,11 +1,11 @@
 import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
-import { RedisClientType } from '@/datasources/cache/cache.module';
 import { ICacheService } from '@/datasources/cache/cache.service.interface';
 import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
 import { ICacheReadiness } from '@/domain/interfaces/cache-readiness.interface';
 import { ILoggingService, LoggingService } from '@/logging/logging.interface';
 import { IConfigurationService } from '@/config/configuration.service.interface';
 import { CacheKeyPrefix } from '@/datasources/cache/constants';
+import { RedisClientType } from 'redis';
 
 @Injectable()
 export class RedisCacheService
@@ -25,6 +25,14 @@ export class RedisCacheService
       this.configurationService.getOrThrow<number>(
         'expirationTimeInSeconds.default',
       );
+  }
+
+  getClient(): RedisClientType {
+    return this.client;
+  }
+
+  getKeyPrefix(): string {
+    return this.keyPrefix;
   }
 
   async ping(): Promise<unknown> {

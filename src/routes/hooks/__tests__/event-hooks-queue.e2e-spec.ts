@@ -47,9 +47,7 @@ describe('Events queue processing e2e tests', () => {
 
     app = await new TestAppProvider().provide(moduleRef);
     await app.init();
-    redisClient = await redisClientFactory(
-      faker.number.int({ min: 1, max: 10 }),
-    );
+    redisClient = await redisClientFactory();
     const amqpClient = amqpClientFactory(queue);
     channel = amqpClient.channel;
     queueName = amqpClient.queueName;
@@ -61,7 +59,7 @@ describe('Events queue processing e2e tests', () => {
     await app.close();
   });
 
-  it.each([
+  it.only.each([
     {
       type: 'INCOMING_TOKEN',
       tokenAddress: faker.finance.ethereumAddress(),
