@@ -177,6 +177,7 @@ describe('BlockchainApiManager', () => {
         },
         method: 'POST',
         signal: expect.any(AbortSignal),
+        url: chain.rpcUri.value,
       });
       const cached = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(cached!)).toBe(chainId);
@@ -238,6 +239,7 @@ describe('BlockchainApiManager', () => {
         },
         method: 'POST',
         signal: expect.any(AbortSignal),
+        url: chain.rpcUri.value,
       });
       const cached = await redisCacheService.hGet(cacheDir);
       expect(JSON.parse(cached!)).toStrictEqual(blockByNumber);
