@@ -14,9 +14,10 @@ import type { RedisClientType } from 'redis';
 import { getAddress } from 'viem';
 import type { Server } from 'net';
 import { TEST_SAFE } from '@/routes/common/__tests__/constants';
-import { chainBuilder } from '@/domain/chains/entities/__tests__/chain.builder';
 import { PostgresDatabaseModuleV2 } from '@/datasources/db/v2/postgres-database.module';
 import { TestPostgresDatabaseModuleV2 } from '@/datasources/db/v2/test.postgres-database.module';
+import { KilnDecoder } from '@/domain/staking/contracts/decoders/kiln-decoder.helper';
+import { stakeBuilder } from '@/datasources/staking-api/entities/__tests__/stake.entity.builder';
 
 describe('Events queue processing e2e tests', () => {
   let app: INestApplication<Server>;
@@ -219,6 +220,50 @@ describe('Events queue processing e2e tests', () => {
       `${cacheKeyPrefix}-${cacheDir.key}`,
       cacheDir.field,
       faker.string.alpha(),
+    );
+    const data = {
+      address: TEST_SAFE.address,
+      chainId: TEST_SAFE.chainId,
+      ...payload,
+    };
+
+    await channel.sendToQueue(queueName, data);
+
+    await retry(async () => {
+      const cacheContent = await redisClient.hGet(
+        `${cacheKeyPrefix}-${cacheDir.key}`,
+        cacheDir.field,
+      );
+      expect(cacheContent).toBeNull();
+    });
+  });
+
+  it.each([
+    {
+      type: 'EXECUTED_MULTISIG_TRANSACTION',
+      safeTxHash: faker.string.hexadecimal({ length: 32 }),
+      txHash: faker.string.hexadecimal({ length: 32 }),
+    },
+    {
+      type: 'MODULE_TRANSACTION',
+      module: faker.finance.ethereumAddress(),
+      txHash: faker.string.hexadecimal({ length: 32 }),
+    },
+  ])('$type clears Safe stakes', async (payload) => {
+    const validatorsPublicKeys = faker.string.hexadecimal({
+      length: KilnDecoder.KilnPublicKeyLength,
+    });
+    const stakes = Array.from({ length: validatorsPublicKeys.length }, () =>
+      stakeBuilder().build(),
+    );
+    const cacheDir = new CacheDir(
+      `${TEST_SAFE.chainId}_staking_stakes_${getAddress(TEST_SAFE.address)}`,
+      validatorsPublicKeys,
+    );
+    await redisClient.hSet(
+      `${cacheKeyPrefix}-${cacheDir.key}`,
+      cacheDir.field,
+      JSON.stringify(stakes),
     );
     const data = {
       address: TEST_SAFE.address,
@@ -490,41 +535,25 @@ describe('Events queue processing e2e tests', () => {
 
   it.each([
     {
-      type: 'CHAIN_UPDATE',
+      type: 'SAFE_CREATED',
+      blockNumber: faker.number.int(),
     },
-  ])('$type clears chain', async (payload) => {
-    const chain = chainBuilder().build();
-    const cacheDir = new CacheDir(`${chain.chainId}_chain`, '');
-    await redisClient.hSet(
-      `${cacheKeyPrefix}-${cacheDir.key}`,
-      cacheDir.field,
-      JSON.stringify(chain),
+  ])('$type clears Safe existence', async (payload) => {
+    const cacheDir = new CacheDir(
+      `${TEST_SAFE.chainId}_safe_exists_${TEST_SAFE.address}`,
+      '',
     );
-    const data = { chainId: chain.chainId, ...payload };
-
-    await channel.sendToQueue(queueName, data);
-
-    await retry(async () => {
-      const cacheContent = await redisClient.hGet(
-        `${cacheKeyPrefix}-${cacheDir.key}`,
-        cacheDir.field,
-      );
-      expect(cacheContent).toBeNull();
-    });
-  });
-
-  it.each([
-    {
-      type: 'SAFE_APPS_UPDATE',
-    },
-  ])('$type clears safe apps', async (payload) => {
-    const cacheDir = new CacheDir(`${TEST_SAFE.chainId}_safe_apps`, '');
     await redisClient.hSet(
       `${cacheKeyPrefix}-${cacheDir.key}`,
       cacheDir.field,
       faker.string.alpha(),
     );
-    const data = { chainId: TEST_SAFE.chainId, ...payload };
+
+    const data = {
+      address: TEST_SAFE.address,
+      chainId: TEST_SAFE.chainId,
+      ...payload,
+    };
 
     await channel.sendToQueue(queueName, data);
 
