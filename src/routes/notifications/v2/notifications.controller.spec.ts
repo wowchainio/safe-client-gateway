@@ -174,7 +174,10 @@ describe('Notifications Controller V2 (Unit)', () => {
       expect(
         notificationsRepository.upsertSubscriptions,
       ).toHaveBeenNthCalledWith(1, {
-        signerAddress,
+        authPayload: {
+          signer_address: signerAddress,
+          chain_id: authPayloadDto.chain_id,
+        },
         upsertSubscriptionsDto,
       });
     });
@@ -244,7 +247,10 @@ describe('Notifications Controller V2 (Unit)', () => {
       expect(
         notificationsRepository.upsertSubscriptions,
       ).toHaveBeenNthCalledWith(1, {
-        signerAddress,
+        authPayload: {
+          signer_address: signerAddress,
+          chain_id: authPayloadDto.chain_id,
+        },
         upsertSubscriptionsDto,
       });
     });
@@ -312,7 +318,10 @@ describe('Notifications Controller V2 (Unit)', () => {
       expect(
         notificationsRepository.upsertSubscriptions,
       ).toHaveBeenNthCalledWith(1, {
-        signerAddress,
+        authPayload: {
+          signer_address: signerAddress,
+          chain_id: authPayloadDto.chain_id,
+        },
         upsertSubscriptionsDto,
       });
     });
@@ -693,7 +702,10 @@ describe('Notifications Controller V2 (Unit)', () => {
       expect(
         notificationsRepository.getSafeSubscription,
       ).toHaveBeenNthCalledWith(1, {
-        signerAddress,
+        authPayload: {
+          chain_id: authPayloadDto.chain_id,
+          signer_address: authPayloadDto.signer_address,
+        },
         deviceUuid,
         chainId,
         safeAddress,
