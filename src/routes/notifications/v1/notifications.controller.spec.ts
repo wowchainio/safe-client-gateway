@@ -43,6 +43,7 @@ describe('Notifications Controller (Unit)', () => {
   let safeConfigUrl: string;
   let networkService: jest.MockedObjectDeep<INetworkService>;
   let notificationServiceV2: jest.MockedObjectDeep<NotificationsServiceV2>;
+  let isNotificationsV2Enabled: boolean;
 
   beforeEach(async () => {
     jest.resetAllMocks();
@@ -75,6 +76,9 @@ describe('Notifications Controller (Unit)', () => {
     );
     notificationServiceV2 = moduleFixture.get(NotificationsServiceV2);
     safeConfigUrl = configurationService.getOrThrow('safeConfig.baseUri');
+    isNotificationsV2Enabled = configurationService.getOrThrow(
+      'features.pushNotifications',
+    );
     networkService = moduleFixture.get(NetworkService);
 
     app = await new TestAppProvider().provide(moduleFixture);
@@ -153,18 +157,20 @@ describe('Notifications Controller (Unit)', () => {
             (safeRegistration) => safeRegistration.safes.length > 0,
           );
 
-        expect(notificationServiceV2.upsertSubscriptions).toHaveBeenCalledTimes(
-          safeRegistrationsWithSafe.length,
-        );
-
-        for (const [
-          index,
-          upsertSubscriptionsV2,
-        ] of upsertSubscriptionsV2Dto.entries()) {
-          const nthCall = index + 1; // Convert zero-based index to a one-based call number
+        if (isNotificationsV2Enabled) {
           expect(
             notificationServiceV2.upsertSubscriptions,
-          ).toHaveBeenNthCalledWith(nthCall, upsertSubscriptionsV2);
+          ).toHaveBeenCalledTimes(safeRegistrationsWithSafe.length);
+
+          for (const [
+            index,
+            upsertSubscriptionsV2,
+          ] of upsertSubscriptionsV2Dto.entries()) {
+            const nthCall = index + 1; // Convert zero-based index to a one-based call number
+            expect(
+              notificationServiceV2.upsertSubscriptions,
+            ).toHaveBeenNthCalledWith(nthCall, upsertSubscriptionsV2);
+          }
         }
       },
     );
@@ -206,7 +212,11 @@ describe('Notifications Controller (Unit)', () => {
           }),
         );
 
-      expect(notificationServiceV2.upsertSubscriptions).not.toHaveBeenCalled();
+      if (isNotificationsV2Enabled) {
+        expect(
+          notificationServiceV2.upsertSubscriptions,
+        ).not.toHaveBeenCalled();
+      }
     });
 
     it('Server errors returned from provider', async () => {
@@ -244,7 +254,11 @@ describe('Notifications Controller (Unit)', () => {
           error: 'Internal Server Error',
         });
 
-      expect(notificationServiceV2.upsertSubscriptions).not.toHaveBeenCalled();
+      if (isNotificationsV2Enabled) {
+        expect(
+          notificationServiceV2.upsertSubscriptions,
+        ).not.toHaveBeenCalled();
+      }
     });
 
     it('Both client and server errors returned from provider', async () => {
@@ -297,7 +311,11 @@ describe('Notifications Controller (Unit)', () => {
           error: 'Internal Server Error',
         });
 
-      expect(notificationServiceV2.upsertSubscriptions).not.toHaveBeenCalled();
+      if (isNotificationsV2Enabled) {
+        expect(
+          notificationServiceV2.upsertSubscriptions,
+        ).not.toHaveBeenCalled();
+      }
     });
 
     it('No status code errors returned from provider', async () => {
@@ -333,7 +351,11 @@ describe('Notifications Controller (Unit)', () => {
           error: 'Internal Server Error',
         });
 
-      expect(notificationServiceV2.upsertSubscriptions).not.toHaveBeenCalled();
+      if (isNotificationsV2Enabled) {
+        expect(
+          notificationServiceV2.upsertSubscriptions,
+        ).not.toHaveBeenCalled();
+      }
     });
   });
 
@@ -362,8 +384,10 @@ describe('Notifications Controller (Unit)', () => {
         url: expectedProviderURL,
       });
 
-      expect(notificationServiceV2.deleteDevice).toHaveBeenCalledTimes(1);
-      expect(notificationServiceV2.deleteDevice).toHaveBeenCalledWith(uuid);
+      if (isNotificationsV2Enabled) {
+        expect(notificationServiceV2.deleteDevice).toHaveBeenCalledTimes(1);
+        expect(notificationServiceV2.deleteDevice).toHaveBeenCalledWith(uuid);
+      }
     });
 
     it('Failure: Config API fails', async () => {
@@ -380,7 +404,9 @@ describe('Notifications Controller (Unit)', () => {
         .expect(503);
       expect(networkService.delete).toHaveBeenCalledTimes(0);
 
-      expect(notificationServiceV2.deleteDevice).not.toHaveBeenCalled();
+      if (isNotificationsV2Enabled) {
+        expect(notificationServiceV2.deleteDevice).not.toHaveBeenCalled();
+      }
     });
 
     it('Failure: Transaction API fails', async () => {
@@ -403,7 +429,9 @@ describe('Notifications Controller (Unit)', () => {
         .expect(503);
       expect(networkService.delete).toHaveBeenCalledTimes(1);
 
-      expect(notificationServiceV2.deleteDevice).not.toHaveBeenCalled();
+      if (isNotificationsV2Enabled) {
+        expect(notificationServiceV2.deleteDevice).not.toHaveBeenCalled();
+      }
     });
   });
 
@@ -436,12 +464,16 @@ describe('Notifications Controller (Unit)', () => {
         url: expectedProviderURL,
       });
 
-      expect(notificationServiceV2.deleteSubscription).toHaveBeenCalledTimes(1);
-      expect(notificationServiceV2.deleteSubscription).toHaveBeenCalledWith({
-        deviceUuid: uuid,
-        chainId: chain.chainId,
-        safeAddress: getAddress(safeAddress),
-      });
+      if (isNotificationsV2Enabled) {
+        expect(notificationServiceV2.deleteSubscription).toHaveBeenCalledTimes(
+          1,
+        );
+        expect(notificationServiceV2.deleteSubscription).toHaveBeenCalledWith({
+          deviceUuid: uuid,
+          chainId: chain.chainId,
+          safeAddress: getAddress(safeAddress),
+        });
+      }
     });
 
     it('Failure: Config API fails', async () => {
@@ -461,7 +493,9 @@ describe('Notifications Controller (Unit)', () => {
         .expect(503);
       expect(networkService.delete).toHaveBeenCalledTimes(0);
 
-      expect(notificationServiceV2.deleteSubscription).not.toHaveBeenCalled();
+      if (isNotificationsV2Enabled) {
+        expect(notificationServiceV2.deleteSubscription).not.toHaveBeenCalled();
+      }
     });
 
     it('Failure: Transaction API fails', async () => {
@@ -487,7 +521,9 @@ describe('Notifications Controller (Unit)', () => {
         .expect(503);
       expect(networkService.delete).toHaveBeenCalledTimes(1);
 
-      expect(notificationServiceV2.deleteSubscription).not.toHaveBeenCalled();
+      if (isNotificationsV2Enabled) {
+        expect(notificationServiceV2.deleteSubscription).not.toHaveBeenCalled();
+      }
     });
   });
 });
