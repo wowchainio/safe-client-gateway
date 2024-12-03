@@ -12,9 +12,9 @@ interface IPostgresEnvConfig {
   database: string;
   ssl: {
     enabled: boolean;
-    caPath: string | undefined;
-    requestCert: boolean;
-    rejectUnauthorized: boolean;
+    caPath?: string | undefined;
+    requestCert?: boolean;
+    rejectUnauthorized?: boolean;
   };
 }
 

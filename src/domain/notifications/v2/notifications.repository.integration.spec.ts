@@ -19,6 +19,8 @@ import { notificationDeviceBuilder } from '@/datasources/notifications/entities/
 import { NotificationType as NotificationTypeEnum } from '@/domain/notifications/v2/entities/notification.entity';
 import { DatabaseMigrator } from '@/datasources/db/v2/database-migrator.service';
 import type { ConfigService } from '@nestjs/config';
+import { PostgreSqlContainer } from '@/__tests__/containers/postgres.container';
+import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 
 describe('NotificationsRepositoryV2', () => {
   const mockLoggingService = {
@@ -43,94 +45,10 @@ describe('NotificationsRepositoryV2', () => {
 
   const config = configuration();
   const testDatabaseName = faker.string.alpha({ length: 10, casing: 'lower' });
-  const dataSource = new DataSource({
-    ...postgresConfig({
-      ...config.db.connection.postgres,
-      type: 'postgres',
-      database: testDatabaseName,
-    }),
-    migrationsTableName: config.db.orm.migrationsTableName,
-    entities: [
-      NotificationType,
-      NotificationSubscription,
-      NotificationDevice,
-      NotificationSubscriptionNotificationType,
-    ],
-  });
+  let dataSource: DataSource;
   let postgresDatabaseService: PostgresDatabaseService;
   let notificationsRepositoryService: INotificationsRepositoryV2;
-
-  /**
-   * Creates a new database specifically for testing purposes.
-   *
-   * TypeORM requires a database name to initialize a datasource.
-   * To create a new test database, this function first connects
-   * to the default `postgres` database, allowing the new database
-   * to be created for test use.
-   *
-   * @async
-   * @function createTestDatabase
-   * @returns {Promise<void>} Resolves when migrations are complete.
-   */
-  async function createTestDatabase(): Promise<void> {
-    const testDataSource = new DataSource({
-      ...postgresConfig({
-        ...config.db.connection.postgres,
-        type: 'postgres',
-        database: 'postgres',
-      }),
-    });
-    const testPostgresDatabaseService = new PostgresDatabaseService(
-      mockLoggingService,
-      testDataSource,
-    );
-    await testPostgresDatabaseService.initializeDatabaseConnection();
-    await testPostgresDatabaseService
-      .getDataSource()
-      .query(`CREATE DATABASE ${testDatabaseName}`);
-    await testPostgresDatabaseService.destroyDatabaseConnection();
-  }
-
-  /**
-   * Initializes the test database connection
-   *
-   * @async
-   * @function createDatabaseConnection
-   * @returns {Promise<PostgresDatabaseService>} Returns an instance of PostgresDatabaseService
-   */
-  async function createDatabaseConnection(): Promise<PostgresDatabaseService> {
-    const databaseService = new PostgresDatabaseService(
-      mockLoggingService,
-      dataSource,
-    );
-    await databaseService.initializeDatabaseConnection();
-
-    return databaseService;
-  }
-
-  /**
-   * Runs database migrations for the test or application database.
-   *
-   * This function initializes a `DatabaseMigrator` instance with the necessary
-   * services (logging, database, and configuration) and executes the migration
-   * process.
-   *
-   * @param {postgresDatabaseService} postgresDatabaseService The postgres database service instance
-   *
-   * @async
-   * @function migrateDatabase
-   * @returns {Promise<void>} Resolves when migrations are complete.
-   */
-  async function migrateDatabase(
-    postgresDatabaseService: PostgresDatabaseService,
-  ): Promise<void> {
-    const migrator = new DatabaseMigrator(
-      mockLoggingService,
-      postgresDatabaseService,
-      mockConfigService,
-    );
-    await migrator.migrate();
-  }
+  let postgresContainer: StartedPostgreSqlContainer;
 
   /**
    * Truncates data in specific tables used for notifications.
@@ -173,9 +91,40 @@ describe('NotificationsRepositoryV2', () => {
   }
 
   beforeAll(async () => {
-    await createTestDatabase();
-    postgresDatabaseService = await createDatabaseConnection();
-    await migrateDatabase(postgresDatabaseService);
+    postgresContainer = await PostgreSqlContainer()
+      .withDatabase(testDatabaseName)
+      .start();
+    dataSource = new DataSource({
+      ...postgresConfig({
+        ...config.db.connection.postgres,
+        host: postgresContainer.getHost(),
+        port: postgresContainer.getPort().toString(),
+        username: postgresContainer.getUsername(),
+        password: postgresContainer.getPassword(),
+        database: postgresContainer.getDatabase(),
+        type: 'postgres',
+        ssl: { enabled: false },
+      }),
+      migrationsTableName: config.db.orm.migrationsTableName,
+      entities: [
+        NotificationType,
+        NotificationSubscription,
+        NotificationDevice,
+        NotificationSubscriptionNotificationType,
+      ],
+    });
+
+    postgresDatabaseService = new PostgresDatabaseService(
+      mockLoggingService,
+      dataSource,
+    );
+    await postgresDatabaseService.initializeDatabaseConnection();
+    const migrator = new DatabaseMigrator(
+      mockLoggingService,
+      postgresDatabaseService,
+      mockConfigService,
+    );
+    await migrator.migrate();
 
     notificationsRepositoryService = new NotificationsRepositoryV2(
       mockPushNotificationsApi,
@@ -187,6 +136,7 @@ describe('NotificationsRepositoryV2', () => {
   afterAll(async () => {
     await postgresDatabaseService.getDataSource().dropDatabase();
     await postgresDatabaseService.destroyDatabaseConnection();
+    await postgresContainer.stop();
   });
 
   beforeEach(async () => {
