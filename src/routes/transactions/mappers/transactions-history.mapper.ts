@@ -6,7 +6,7 @@ import {
   isEthereumTransaction,
   isModuleTransaction,
   isMultisigTransaction,
-  Transaction as TransactionDomain,
+  Transaction as DomainTransaction,
 } from '@/domain/safe/entities/transaction.entity';
 import { Transfer } from '@/domain/safe/entities/transfer.entity';
 import { DateLabel } from '@/routes/common/entities/date-label.entity';
@@ -21,12 +21,16 @@ import {
   calculateTimezoneOffset,
   convertToTimezone,
 } from '@/routes/transactions/helpers/timezone.helper';
+import { Token } from '@/domain/tokens/entities/token.entity';
+import { TokenRepository } from '@/domain/tokens/token.repository';
+import { ITokenRepository } from '@/domain/tokens/token.repository.interface';
 
 @Injectable()
 export class TransactionsHistoryMapper {
   private readonly maxNestedTransfers: number;
 
   constructor(
+    @Inject(ITokenRepository) private readonly tokenRepository: TokenRepository,
     @Inject(IConfigurationService)
     private readonly configurationService: IConfigurationService,
     private readonly multisigTransactionMapper: MultisigTransactionMapper,
@@ -42,7 +46,7 @@ export class TransactionsHistoryMapper {
 
   async mapTransactionsHistory(
     chainId: string,
-    transactionsDomain: TransactionDomain[],
+    domainTransactions: DomainTransaction[],
     safe: Safe,
     offset: number,
     timezoneOffset: number,
@@ -50,20 +54,24 @@ export class TransactionsHistoryMapper {
     showImitations: boolean,
     timezone?: string,
   ): Promise<Array<TransactionItem | DateLabel>> {
-    if (transactionsDomain.length == 0) {
+    if (domainTransactions.length == 0) {
       return [];
     }
-    // Must be retrieved before mapping others as we remove it from transactionsDomain
+    await this.prefetchTokens({
+      chainId,
+      transactions: domainTransactions,
+    });
+    // Must be retrieved before mapping others as we remove it from domainTransactions
     const previousTransaction = await this.getPreviousTransaction({
       offset,
-      transactionsDomain,
+      domainTransactions,
       chainId,
       safe,
       onlyTrusted,
     });
 
     const mappedTransactions = await this.getMappedTransactions({
-      transactionsDomain,
+      domainTransactions,
       chainId,
       safe,
       previousTransaction,
@@ -96,18 +104,39 @@ export class TransactionsHistoryMapper {
     );
   }
 
+  private async prefetchTokens(args: {
+    chainId: string;
+    transactions: DomainTransaction[];
+  }): Promise<Token[]> {
+    const txs = args.transactions.filter(
+      isMultisigTransaction || isModuleTransaction,
+    );
+    const transfers = args.transactions.filter(isEthereumTransaction);
+    const tokenAddresses = Array.from(
+      new Set([...txs.map((tx) => tx.to), ...transfers.map((tx) => tx.from)]),
+    );
+    const tokens = await Promise.all(
+      tokenAddresses.map((address) =>
+        this.tokenRepository
+          .getToken({ chainId: args.chainId, address })
+          .catch(() => null),
+      ),
+    );
+    return tokens.filter((token): token is Token => token !== null);
+  }
+
   private async getPreviousTransaction(args: {
     offset: number;
-    transactionsDomain: TransactionDomain[];
+    domainTransactions: DomainTransaction[];
     chainId: string;
     safe: Safe;
     onlyTrusted: boolean;
   }): Promise<TransactionItem | undefined> {
     // More than 1 element is required to get the previous transaction
-    if (args.offset <= 0 || args.transactionsDomain.length <= 1) {
+    if (args.offset <= 0 || args.domainTransactions.length <= 1) {
       return;
     }
-    const prevDomainTransaction = args.transactionsDomain[0];
+    const prevDomainTransaction = args.domainTransactions[0];
     // We map in order to filter last list item against it
     const mappedPreviousTransaction = await this.mapTransaction(
       prevDomainTransaction,
@@ -116,7 +145,7 @@ export class TransactionsHistoryMapper {
       args.onlyTrusted,
     );
     // Remove first transaction that was requested to get previous day timestamp
-    args.transactionsDomain = args.transactionsDomain.slice(1);
+    args.domainTransactions = args.domainTransactions.slice(1);
 
     return Array.isArray(mappedPreviousTransaction)
       ? // All transfers should have same execution date but the last is "true" previous
@@ -125,7 +154,7 @@ export class TransactionsHistoryMapper {
   }
 
   private async getMappedTransactions(args: {
-    transactionsDomain: TransactionDomain[];
+    domainTransactions: DomainTransaction[];
     chainId: string;
     safe: Safe;
     previousTransaction: TransactionItem | undefined;
@@ -133,7 +162,7 @@ export class TransactionsHistoryMapper {
     showImitations: boolean;
   }): Promise<TransactionItem[]> {
     const mappedTransactions = await Promise.all(
-      args.transactionsDomain.map((transaction) => {
+      args.domainTransactions.map((transaction) => {
         return this.mapTransaction(
           transaction,
           args.chainId,
@@ -204,7 +233,7 @@ export class TransactionsHistoryMapper {
   }
 
   private async mapTransaction(
-    transaction: TransactionDomain,
+    transaction: DomainTransaction,
     chainId: string,
     safe: Safe,
     onlyTrusted: boolean,

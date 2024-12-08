@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { groupBy } from 'lodash';
 import { MultisigTransaction } from '@/domain/safe/entities/multisig-transaction.entity';
 import { Safe } from '@/domain/safe/entities/safe.entity';
@@ -12,6 +12,9 @@ import {
   LabelQueuedItem,
 } from '@/routes/transactions/entities/queued-items/label-queued-item.entity';
 import { TransactionQueuedItem } from '@/routes/transactions/entities/queued-items/transaction-queued-item.entity';
+import { TokenRepository } from '@/domain/tokens/token.repository';
+import { ITokenRepository } from '@/domain/tokens/token.repository.interface';
+import { Token } from '@/domain/tokens/entities/token.entity';
 
 class TransactionGroup {
   nonce!: number;
@@ -20,7 +23,10 @@ class TransactionGroup {
 
 @Injectable()
 export class QueuedItemsMapper {
-  constructor(private readonly mapper: MultisigTransactionMapper) {}
+  constructor(
+    @Inject(ITokenRepository) private readonly tokenRepository: TokenRepository,
+    private readonly mapper: MultisigTransactionMapper,
+  ) {}
 
   async getQueuedItems(
     transactions: Page<MultisigTransaction>,
@@ -51,14 +57,14 @@ export class QueuedItemsMapper {
           transactionGroupItems.push(new ConflictHeaderQueuedItem(nonce));
         }
 
-        const mappedTransactionItems = await this.getMappedTransactionGroup(
+        const mappedTransactionItems = await this.getMappedTransactionGroup({
           chainId,
           safe,
           hasConflicts,
           conflictFromPreviousPage,
           isEdgeGroup,
           transactionGroup,
-        );
+        });
 
         transactionGroupItems.push(...mappedTransactionItems);
         return transactionGroupItems;
@@ -66,30 +72,54 @@ export class QueuedItemsMapper {
     ).then((items) => items.flat());
   }
 
-  private async getMappedTransactionGroup(
-    chainId: string,
-    safe: Safe,
-    hasConflicts: boolean,
-    conflictFromPreviousPage: boolean,
-    isEdgeGroup: boolean,
-    transactionGroup: TransactionGroup,
-  ): Promise<TransactionQueuedItem[]> {
+  private async getMappedTransactionGroup(args: {
+    chainId: string;
+    safe: Safe;
+    hasConflicts: boolean;
+    conflictFromPreviousPage: boolean;
+    isEdgeGroup: boolean;
+    transactionGroup: TransactionGroup;
+  }): Promise<TransactionQueuedItem[]> {
+    await this.prefetchTokens({
+      chainId: args.chainId,
+      transactions: args.transactionGroup.transactions,
+    });
     return Promise.all(
-      transactionGroup.transactions.map(async (transaction, idx) => {
+      args.transactionGroup.transactions.map(async (transaction, idx) => {
         const isFirstInGroup = idx === 0;
-        const isLastInGroup = idx === transactionGroup.transactions.length - 1;
+        const isLastInGroup =
+          idx === args.transactionGroup.transactions.length - 1;
         return new TransactionQueuedItem(
-          await this.mapper.mapTransaction(chainId, transaction, safe),
+          await this.mapper.mapTransaction(
+            args.chainId,
+            transaction,
+            args.safe,
+          ),
           this.getConflictType(
             isFirstInGroup,
             isLastInGroup,
-            hasConflicts,
-            conflictFromPreviousPage,
-            isEdgeGroup,
+            args.hasConflicts,
+            args.conflictFromPreviousPage,
+            args.isEdgeGroup,
           ),
         );
       }),
     );
+  }
+
+  private async prefetchTokens(args: {
+    chainId: string;
+    transactions: MultisigTransaction[];
+  }): Promise<Token[]> {
+    const tokenAddresses = Array.from(
+      new Set(args.transactions.map((tx) => tx.to)),
+    );
+    const tokens = await Promise.all(
+      tokenAddresses.map((address) =>
+        this.tokenRepository.getToken({ chainId: args.chainId, address }),
+      ),
+    );
+    return tokens.filter((token): token is Token => token !== null);
   }
 
   private getConflictType(
