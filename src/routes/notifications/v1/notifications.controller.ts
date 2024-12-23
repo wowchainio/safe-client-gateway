@@ -61,6 +61,8 @@ export class NotificationsController {
       return await this.notificationsService.registerDevice(registerDeviceDto);
     }
 
+    console.log('registerDeviceDto:', JSON.stringify(registerDeviceDto));
+
     if (registerDeviceDto.timestamp) {
       this.validateTimestamp(parseInt(registerDeviceDto.timestamp));
     }
@@ -161,6 +163,9 @@ export class NotificationsController {
         (safe) => safe.safes,
       );
 
+      console.log(
+        `gnosis-safe${args.timestamp}${args.uuid}${args.cloudMessagingToken}${safeAddresses.sort().join('')}`,
+      );
       const recoveredAddress = await recoverMessageAddress({
         message: {
           raw: keccak256(
